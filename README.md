@@ -1,6 +1,6 @@
-# DevGamer Bot 🎮🦀
+# LootCrab 🦀
 
-A Discord bot built in Rust, designed for learning the language while being useful for developers and gamers.
+A Discord bot that hunts free games and helps developers. Built in Rust for learning purposes.
 
 ## Features
 
@@ -32,7 +32,7 @@ A Discord bot built in Rust, designed for learning the language while being usef
 
 1. **Clone and configure**
 ```bash
-cd devgamer-bot
+cd lootcrab
 cp .env.example .env
 # Edit .env and add your DISCORD_TOKEN
 ```

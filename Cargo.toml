@@ -1,9 +1,9 @@
 [package]
-name = "devgamer-bot"
+name = "lootcrab"
 version = "0.1.0"
 edition = "2024"
 authors = ["wilou"]
-description = "A Discord bot for developers and gamers, built to learn Rust"
+description = "Discord bot for free games notifications and dev tools, built in Rust"
 license = "MIT"
 
 [dependencies]
