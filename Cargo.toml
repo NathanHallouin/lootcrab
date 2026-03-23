@@ -1,0 +1,42 @@
+[package]
+name = "devgamer-bot"
+version = "0.1.0"
+edition = "2024"
+authors = ["wilou"]
+description = "A Discord bot for developers and gamers, built to learn Rust"
+license = "MIT"
+
+[dependencies]
+# Discord API framework (built on serenity)
+# Utilise rustls par défaut (pas de dépendance à OpenSSL)
+poise = "0.6"
+
+# Async runtime - CONCEPT: async/await
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "fs"] }
+
+# Environment variables - CONCEPT: configuration management
+dotenvy = "0.15"
+
+# Logging/tracing - CONCEPT: observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Serialization - CONCEPT: traits, derive macros
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling - CONCEPT: Result, custom errors
+thiserror = "2"
+anyhow = "1"
+
+# HTTP client for external APIs
+# rustls-tls évite la dépendance à OpenSSL
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+# Testing - CONCEPT: unit tests, mocking
+tokio-test = "0.4"
+tempfile = "3"
