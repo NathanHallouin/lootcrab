@@ -2,120 +2,142 @@
 
 ## Structs
 
-Group related data together.
+Group related data together. Fields are private by default.
 
 ```rust
-// src/models/mod.rs
+// src/services/config.rs
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Reminder {
-    pub id: u64,
-    pub message: String,
-    pub trigger_at: DateTime<Utc>,
+pub struct BotConfig {
+    pub free_games_channel_id: Option<u64>,  // pub = accessible from outside
+    pub free_games_hour: u32,
 }
 
-impl Reminder {
-    // Associated function (constructor)
-    pub fn new(id: u64, message: String) -> Self {
-        Self { id, message, trigger_at: Utc::now() }
-    }
+impl BotConfig {
+    // No self parameter → associated function, called with ::
+    fn default() -> Self { /* ... */ }
+}
+```
 
-    // Method (takes &self)
-    pub fn should_trigger(&self) -> bool {
-        Utc::now() >= self.trigger_at
-    }
+```rust
+// src/services/free_games.rs
+#[derive(Debug, Clone)]
+pub struct FreeGame {
+    pub title: String,
+    pub store: Store,
+    pub url: String,
+    pub original_price: Option<String>,
+    pub end_date: Option<DateTime<Utc>>,
+    pub image_url: Option<String>,
+}
+```
+
+### Struct Initialization
+
+```rust
+// All fields must be set — no partial initialization
+FreeGame {
+    title: game.title,
+    store: Store::EpicGames,
+    url,  // Shorthand: field name matches variable name
+    original_price: None,
+    end_date: Some(current_offer.end_date),
+    image_url,
+}
+
+// Struct update syntax: fill remaining fields from another instance
+FrameworkOptions {
+    commands: vec![...],
+    ..Default::default()  // All other fields use defaults
 }
 ```
 
 ## Enums
 
-Define a type with multiple variants. Unlike C enums, Rust enums can hold data.
+Enums define a type with multiple variants. Unlike C enums, Rust enums can hold data.
 
 ### Simple Enum
 
 ```rust
-// src/commands/dev.rs
-#[derive(Debug, Clone, Copy)]
-pub enum Language {
-    Rust,
-    Python,
-    JavaScript,
+// src/services/free_games.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Store {
+    Steam,
+    EpicGames,
 }
 
-impl Language {
-    fn as_str(&self) -> &'static str {
+impl Store {
+    pub fn emoji(&self) -> &'static str {
         match self {
-            Language::Rust => "rust",
-            Language::Python => "python",
-            Language::JavaScript => "javascript",
+            Store::Steam => "🎮",
+            Store::EpicGames => "🎁",
         }
     }
 }
 ```
 
-### Enum with Data
+### Enum as Slash Command Choice
 
 ```rust
-// src/error.rs
-#[derive(Error, Debug)]
-pub enum BotError {
-    Config(String),       // Holds a String
-    RateLimit(u64),       // Holds a number
-    Discord(SerenityError), // Holds another error type
+// src/commands/dev.rs — poise generates Discord choices from enum variants
+#[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
+pub enum Language {
+    Rust,
+    Python,
+    JavaScript,
+    // ...
 }
 ```
 
 ## Pattern Matching
 
-`match` must handle all cases (exhaustive).
+`match` must be exhaustive — the compiler ensures all cases are handled.
 
 ```rust
-match language {
-    Language::Rust => println!("Best language!"),
-    Language::Python => println!("Also good"),
-    _ => println!("Other"),  // Catch-all
+// Match with guards
+match remaining.num_days() {
+    d if d > 0 => format!("{}d", d),
+    _ => "Last hours!".to_string(),
 }
 
-// With guards
-match value {
-    n if n < 0 => println!("Negative"),
-    0 => println!("Zero"),
-    n => println!("Positive: {}", n),
+// Match on tuple of Options
+match (&a.end_date, &b.end_date) {
+    (Some(a_date), Some(b_date)) => a_date.cmp(b_date),
+    (Some(_), None) => Ordering::Less,
+    (None, Some(_)) => Ordering::Greater,
+    (None, None) => Ordering::Equal,
 }
 ```
 
-### if let - Single Pattern
+### if let — Single Pattern
 
 ```rust
-// Instead of matching all cases
-if let Some(channel_id) = config.channel {
-    // Only runs if Some
+// Only handle one variant
+if let Some(image_url) = &game.image_url {
+    embed = embed.image(image_url);
 }
 
-// Equivalent to
-match config.channel {
-    Some(channel_id) => { /* ... */ }
+// Equivalent but more verbose:
+match &game.image_url {
+    Some(image_url) => { embed = embed.image(image_url); }
     None => {}
 }
 ```
 
 ## Derive Macros
 
-Auto-generate trait implementations.
+Auto-generate trait implementations at compile time.
 
 ```rust
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Config {
-    pub channel_id: Option<u64>,
-    pub hour: u32,
-}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotConfig { /* ... */ }
 ```
 
-| Derive | What it does |
-|--------|--------------|
+| Derive | Effect |
+|--------|--------|
 | `Debug` | Enables `{:?}` formatting |
-| `Clone` | Enables `.clone()` |
-| `Copy` | Implicit copy (small types only) |
-| `Default` | Creates default values |
-| `PartialEq` | Enables `==` comparison |
-| `Serialize` | JSON/etc serialization (serde) |
-| `Deserialize` | JSON/etc deserialization (serde) |
+| `Clone` | Enables explicit `.clone()` |
+| `Copy` | Enables implicit bitwise copy (small stack types only) |
+| `Default` | Creates default values via `Default::default()` |
+| `PartialEq`, `Eq` | Enables `==` comparison |
+| `Serialize` | JSON serialization (serde) |
+| `Deserialize` | JSON deserialization (serde) |

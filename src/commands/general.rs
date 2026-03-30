@@ -1,66 +1,56 @@
-//! # Commandes générales
+//! # General Commands
 //!
-//! ## Concepts Rust illustrés :
-//! - Macros procédurales (`#[poise::command]`)
-//! - Lifetime annotations (`'a`)
-//! - Async functions
+//! ## Rust concepts covered:
+//! - Procedural macros (`#[poise::command]`)
+//! - Lifetime annotations (`'a`, `'static`)
+//! - `&str` vs `String` (borrowed vs owned)
+//! - Pattern matching with `match`
+//! - `Option<T>` for nullable values
+//! - `format!` macro for string interpolation
 
 use crate::{Context, Error};
 
-/// Commande ping - Vérifie que le bot répond.
-///
-/// ## Concept Rust : Attributs et Macros
-/// `#[poise::command(...)]` est une macro procédurale qui génère
-/// du code pour transformer cette fonction en commande Discord.
-#[poise::command(slash_command, prefix_command)]
+/// Check bot latency.
+#[poise::command(slash_command)]
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
-    // ## Concept : Ownership et borrowing
-    // `ctx` est emprunté (borrowed) par la fonction
-    // On utilise `&str` (string slice) plutôt que `String` (owned)
+    // ctx is borrowed (&) — we use it but don't take ownership.
+    // "Pong!" is a &'static str — a string literal baked into the binary.
     ctx.say("Pong! 🏓").await?;
     Ok(())
 }
 
-/// Commande help - Affiche l'aide des commandes.
-///
-/// ## Concept Rust : Documentation
-/// Les commentaires `///` génèrent de la documentation
-/// qui peut être consultée avec `cargo doc`.
-#[poise::command(slash_command, prefix_command)]
+/// Display help for all commands or a specific one.
+#[poise::command(slash_command)]
 pub async fn help(
     ctx: Context<'_>,
-    #[description = "Commande spécifique à afficher"] command: Option<String>,
+    #[description = "Specific command to display"] command: Option<String>,
 ) -> Result<(), Error> {
-    // ## Concept : Option<T>
-    // Option représente une valeur optionnelle : Some(valeur) ou None
-    // C'est l'alternative Rust aux null/nil d'autres langages
-
     let help_text = match command {
-        // ## Concept : Pattern matching
-        // `match` permet de gérer tous les cas possibles
+        // `match` is exhaustive — the compiler ensures all cases are handled.
         Some(cmd) => {
-            // ## Concept : format! macro
-            // Similaire à printf, mais retourne une String
+            // format! returns an owned String (heap-allocated)
             format!(
-                "**Aide pour `/{}`**\n{}",
+                "**Help for `/{}`**\n{}",
                 cmd,
-                get_command_help(&cmd)
+                get_command_help(&cmd) // &cmd borrows the String as &str
             )
         }
         None => {
-            // ## Concept : String multiligne avec indentation préservée
+            // Multiline string with `\` continuation (no newline inserted)
             String::from(
-                "**DevGamer Bot - Commandes disponibles**\n\n\
-                **Général:**\n\
-                `/ping` - Vérifie que le bot répond\n\
-                `/help` - Affiche cette aide\n\
-                `/uptime` - Temps depuis le démarrage du bot\n\n\
-                **Développeur:**\n\
-                `/snippet` - Partage un snippet de code formaté\n\
-                `/docs` - Recherche dans la doc Rust\n\n\
+                "**LootCrab - Available commands**\n\n\
+                **General:**\n\
+                `/ping` - Check bot latency\n\
+                `/help` - Show this help\n\
+                `/uptime` - Time since bot started\n\n\
+                **Developer:**\n\
+                `/snippet` - Share a formatted code snippet\n\
+                `/docs` - Search Rust documentation\n\n\
                 **Timers:**\n\
-                `/timer` - Définit un rappel\n\
-                `/pomodoro` - Lance une session Pomodoro",
+                `/timer` - Set a reminder\n\
+                `/pomodoro` - Start a Pomodoro session\n\n\
+                **Gaming:**\n\
+                `/freegames` - Show current free games",
             )
         }
     };
@@ -69,45 +59,39 @@ pub async fn help(
     Ok(())
 }
 
-/// Fonction helper pour obtenir l'aide d'une commande spécifique.
+/// Returns a `&'static str` — a reference that lives for the entire program.
+/// String literals are embedded in the binary, so they never get deallocated.
 ///
-/// ## Concept Rust : &str vs String
-/// - `&str` : Référence immuable vers une chaîne (borrowed)
-/// - `String` : Chaîne possédée (owned), allouée sur le heap
+/// The parameter `&str` is a borrowed string slice — we read it without
+/// taking ownership, so the caller keeps their String/&str.
 fn get_command_help(command: &str) -> &'static str {
-    // ## Concept : 'static lifetime
-    // Les string literals ont une durée de vie 'static
-    // car ils sont intégrés dans le binaire
     match command {
-        "ping" => "Envoie un pong pour vérifier la latence du bot.",
-        "help" => "Affiche l'aide générale ou pour une commande spécifique.",
-        "uptime" => "Affiche depuis combien de temps le bot est en ligne.",
-        "snippet" => "Partage un snippet de code avec coloration syntaxique.\nUsage: `/snippet langage code`",
-        "docs" => "Recherche dans la documentation Rust officielle.",
-        "timer" => "Définit un rappel après un certain temps.\nUsage: `/timer 5m Message de rappel`",
-        "pomodoro" => "Lance une session Pomodoro (25min travail, 5min pause).",
-        _ => "Commande non reconnue. Utilisez `/help` pour voir toutes les commandes.",
+        "ping" => "Sends a pong to check the bot's latency.",
+        "help" => "Shows general help or help for a specific command.",
+        "uptime" => "Shows how long the bot has been running.",
+        "snippet" => "Shares a code snippet with syntax highlighting.\nUsage: `/snippet language code`",
+        "docs" => "Searches the official Rust documentation.",
+        "timer" => "Sets a reminder after a given duration.\nUsage: `/timer 5m Reminder message`",
+        "pomodoro" => "Starts a Pomodoro session (25min work, 5min break).",
+        "freegames" => "Displays currently free games from Epic Games and Steam.",
+        // `_` is a catch-all pattern — matches anything not listed above
+        _ => "Unknown command. Use `/help` to see all commands.",
     }
 }
 
-/// Commande uptime - Affiche le temps depuis le démarrage.
-///
-/// ## Concept Rust : Accès aux données partagées
-/// On accède à `Data` via `ctx.data()` qui retourne une référence.
-#[poise::command(slash_command, prefix_command)]
+/// Show how long the bot has been running.
+#[poise::command(slash_command)]
 pub async fn uptime(ctx: Context<'_>) -> Result<(), Error> {
-    // ## Concept : Instant et Duration
-    // std::time::Instant représente un point dans le temps
-    // elapsed() retourne la Duration depuis cet instant
+    // ctx.data() returns a reference to our shared Data struct
     let duration = ctx.data().start_time.elapsed();
 
-    // ## Concept : as - casting de types
+    // Integer division and modulo for time formatting
     let hours = duration.as_secs() / 3600;
     let minutes = (duration.as_secs() % 3600) / 60;
     let seconds = duration.as_secs() % 60;
 
     let message = format!(
-        "Bot en ligne depuis **{}h {:02}m {:02}s**",
+        "Bot online for **{}h {:02}m {:02}s**",
         hours, minutes, seconds
     );
 
@@ -115,8 +99,9 @@ pub async fn uptime(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-// ## Concept Rust : Tests unitaires
-// Les tests sont dans le même fichier, dans un module `tests`
+/// Unit tests live in the same file, inside a `#[cfg(test)]` module.
+/// `#[cfg(test)]` means this code is only compiled when running `cargo test`.
+/// `use super::*` imports everything from the parent module.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,12 +110,12 @@ mod tests {
     fn test_get_command_help_known_command() {
         let help = get_command_help("ping");
         assert!(!help.is_empty());
-        assert!(help.contains("pong") || help.contains("latence"));
+        assert!(help.contains("pong") || help.contains("latency"));
     }
 
     #[test]
     fn test_get_command_help_unknown_command() {
-        let help = get_command_help("commande_inexistante");
-        assert!(help.contains("non reconnue"));
+        let help = get_command_help("nonexistent_command");
+        assert!(help.contains("Unknown"));
     }
 }

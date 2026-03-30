@@ -1,19 +1,18 @@
-//! # Service de récupération des jeux gratuits
+//! # Free Games API Service
 //!
-//! ## Concepts Rust illustrés :
-//! - HTTP requests asynchrones avec reqwest
-//! - Désérialisation JSON avec serde
-//! - Error handling avec Result
-//! - Structs imbriquées pour mapper des APIs
+//! ## Rust concepts covered:
+//! - Async HTTP requests with reqwest
+//! - JSON deserialization with serde and nested structs
+//! - Iterators: `into_iter()`, `filter_map()`, `flat_map()`, `find()`, `any()`
+//! - `Option` chaining: `.as_ref()`, `.and_then()`, `.or_else()`, `.or()`
+//! - `tokio::join!` for parallel async execution
+//! - `Display` trait implementation
+//! - `#[serde(rename_all)]` for JSON field name mapping
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-/// Représente un jeu gratuit (unifié entre les plateformes).
-///
-/// ## Concept Rust : Debug et Clone
-/// - `Debug` permet d'afficher avec `{:?}` pour le debugging
-/// - `Clone` permet de dupliquer la struct
+/// A free game offer, unified across platforms.
 #[derive(Debug, Clone)]
 pub struct FreeGame {
     pub title: String,
@@ -24,15 +23,16 @@ pub struct FreeGame {
     pub image_url: Option<String>,
 }
 
-/// Plateforme de jeu.
-///
-/// ## Concept Rust : Enum simple avec Display
+/// `PartialEq` and `Eq` enable `==` comparison.
+/// `Copy` is valid here because the enum has no heap data — it's just a tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Store {
     Steam,
     EpicGames,
 }
 
+/// `Display` trait controls how a type is printed with `{}`.
+/// Unlike `Debug` (which uses `{:?}`), `Display` is meant for user-facing output.
 impl std::fmt::Display for Store {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -43,7 +43,6 @@ impl std::fmt::Display for Store {
 }
 
 impl Store {
-    /// Retourne l'emoji correspondant à la plateforme.
     pub fn emoji(&self) -> &'static str {
         match self {
             Store::Steam => "🎮",
@@ -56,22 +55,26 @@ impl Store {
 // Epic Games Store API
 // ============================================================================
 
-/// Structure pour désérialiser la réponse de l'API Epic Games.
-///
-/// ## Concept Rust : Serde attributes
-/// `#[serde(rename_all = "camelCase")]` convertit automatiquement
-/// les noms de champs de camelCase (JSON) vers snake_case (Rust).
+/// Serde structs mirror the JSON structure from the API.
+/// Fields not needed can be omitted — serde ignores unknown fields by default.
+/// `#[serde(default)]` provides a fallback when the field is null or missing.
 #[derive(Debug, Deserialize)]
 struct EpicResponse {
     data: EpicData,
+    #[serde(default)]
+    #[allow(dead_code)]
+    errors: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 struct EpicData {
+    /// `#[serde(rename = "...")]` maps a JSON key to a different Rust field name
     #[serde(rename = "Catalog")]
     catalog: EpicCatalog,
 }
 
+/// `#[serde(rename_all = "camelCase")]` automatically converts
+/// `search_store` (Rust) ↔ `searchStore` (JSON)
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EpicCatalog {
@@ -93,13 +96,17 @@ struct EpicGame {
     promotions: Option<EpicPromotions>,
     catalog_ns: EpicCatalogNs,
     url_slug: Option<String>,
+    product_slug: Option<String>,
+    /// `Option<Vec<T>>` handles both null and missing fields.
+    /// The API returns null when it encounters partial errors.
     #[serde(default)]
-    offer_mappings: Vec<EpicOfferMapping>,
+    offer_mappings: Option<Vec<EpicOfferMapping>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct EpicCatalogNs {
-    mappings: Vec<EpicMapping>,
+    #[serde(default)]
+    mappings: Option<Vec<EpicMapping>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,73 +156,26 @@ struct EpicDiscount {
     discount_percentage: i32,
 }
 
-/// Récupère les jeux gratuits depuis Epic Games Store.
+/// Fetches free games from the Epic Games Store API.
 ///
-/// ## Concept Rust : async fn et Result
-/// La fonction est async car elle fait des I/O réseau.
-/// Elle retourne un Result pour gérer les erreurs proprement.
+/// Demonstrates `filter_map` — combines filter and map in one step.
+/// Return `Some(value)` to keep an element, `None` to skip it.
 pub async fn fetch_epic_free_games() -> Result<Vec<FreeGame>, reqwest::Error> {
     let client = reqwest::Client::new();
-
-    // L'API GraphQL d'Epic Games pour les jeux gratuits
-    // ## Concept : Raw string literals r#"..."#
-    // Permet d'inclure des guillemets sans les échapper
-    // Note: On utilise l'API REST ci-dessous, mais voici la query GraphQL pour référence
-    let _query = r#"
-    query {
-        Catalog {
-            searchStore(
-                category: "games/edition/base"
-                count: 20
-                effectiveDate: "[,]"
-                freeGame: true
-                onSale: true
-                sortBy: "effectiveDate"
-                sortDir: "asc"
-            ) {
-                elements {
-                    title
-                    keyImages {
-                        type
-                        url
-                    }
-                    promotions {
-                        promotionalOffers {
-                            promotionalOffers {
-                                startDate
-                                endDate
-                                discountSetting {
-                                    discountPercentage
-                                }
-                            }
-                        }
-                    }
-                    catalogNs {
-                        mappings {
-                            pageSlug
-                        }
-                    }
-                    urlSlug
-                    offerMappings {
-                        pageSlug
-                    }
-                }
-            }
-        }
-    }
-    "#;
 
     let response = client
         .get("https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=fr&country=FR&allowCountries=FR")
         .send()
         .await?
+        // .json::<T>() deserializes the response body. The turbofish ::<T>
+        // syntax tells the compiler what type to deserialize into.
         .json::<EpicResponse>()
         .await?;
 
     let now = Utc::now();
 
-    // ## Concept : Iterator et filter_map
-    // filter_map combine filter et map : retourne Some pour garder, None pour ignorer
+    // `into_iter()` takes ownership of the Vec (consuming it).
+    // `filter_map` returns Some to keep, None to skip.
     let games: Vec<FreeGame> = response
         .data
         .catalog
@@ -223,8 +183,10 @@ pub async fn fetch_epic_free_games() -> Result<Vec<FreeGame>, reqwest::Error> {
         .elements
         .into_iter()
         .filter_map(|game| {
-            // Vérifier que c'est actuellement gratuit (100% de réduction)
+            // `?` on Option returns None early (like ? on Result returns Err)
             let promo = game.promotions.as_ref()?;
+
+            // `flat_map` flattens nested iterators: Vec<Vec<T>> → Iterator<T>
             let current_offer = promo
                 .promotional_offers
                 .iter()
@@ -235,18 +197,23 @@ pub async fn fetch_epic_free_games() -> Result<Vec<FreeGame>, reqwest::Error> {
                         && offer.end_date > now
                 })?;
 
-            // Construire l'URL
+            // Option chaining: try each source for the URL slug, fall through on None.
+            // .as_ref() borrows the Option's inner value without consuming it.
+            // .and_then() maps Some(x) → f(x), passes through None.
+            // .or_else() tries a fallback closure when the Option is None.
+            // .or() tries a fallback Option value when the Option is None.
             let slug = game
                 .catalog_ns
                 .mappings
-                .first()
+                .as_ref()
+                .and_then(|m| m.first())
                 .map(|m| m.page_slug.clone())
-                .or_else(|| game.offer_mappings.first().map(|m| m.page_slug.clone()))
+                .or_else(|| game.offer_mappings.as_ref().and_then(|m| m.first()).map(|m| m.page_slug.clone()))
+                .or_else(|| game.product_slug.clone())
                 .or(game.url_slug)?;
 
             let url = format!("https://store.epicgames.com/fr/p/{}", slug);
 
-            // Trouver l'image
             let image_url = game
                 .key_images
                 .iter()
@@ -262,67 +229,78 @@ pub async fn fetch_epic_free_games() -> Result<Vec<FreeGame>, reqwest::Error> {
                 image_url,
             })
         })
-        .collect();
+        .collect(); // Collects the iterator into a Vec
 
     Ok(games)
 }
 
 // ============================================================================
-// Steam Free Games (via web scraping d'une API communautaire)
+// GamerPower API (Steam + other platforms)
 // ============================================================================
 
-/// Structure pour l'API Steam des apps gratuites.
 #[derive(Debug, Deserialize)]
-struct SteamFreeGame {
+struct GamerPowerGame {
     title: String,
-    #[serde(rename = "app_id")]
-    app_id: u64,
-    original_price: Option<String>,
-    end_date: Option<i64>,
+    worth: Option<String>,
+    #[serde(rename = "open_giveaway_url")]
+    open_giveaway_url: String,
+    thumbnail: Option<String>,
+    #[allow(dead_code)]
+    platforms: String,
+    end_date: Option<String>,
 }
 
-/// Récupère les jeux temporairement gratuits sur Steam.
+/// Fetches free PC games from the GamerPower API.
 ///
-/// ## Concept Rust : Fallback et error handling
-/// On utilise une API communautaire, avec fallback si elle échoue.
-pub async fn fetch_steam_free_games() -> Result<Vec<FreeGame>, reqwest::Error> {
+/// Demonstrates the builder pattern with `reqwest::Client::builder()`
+/// and `.map()` / `.filter()` on iterators and Options.
+pub async fn fetch_gamerpower_games() -> Result<Vec<FreeGame>, reqwest::Error> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
-    // API communautaire pour les free games Steam
-    // Note: Steam n'a pas d'API officielle facile pour ça
     let response = client
-        .get("https://steam-free-games-api.vercel.app/api/free-games")
+        .get("https://www.gamerpower.com/api/giveaways?platform=pc&type=game&sort-by=popularity")
         .send()
         .await;
 
-    // ## Concept : match avec Result
     match response {
         Ok(resp) => {
-            if let Ok(games) = resp.json::<Vec<SteamFreeGame>>().await {
+            if let Ok(games) = resp.json::<Vec<GamerPowerGame>>().await {
                 let free_games = games
                     .into_iter()
                     .map(|game| {
-                        let url = format!(
-                            "https://store.steampowered.com/app/{}",
-                            game.app_id
-                        );
-                        let end_date = game.end_date.map(|ts| {
-                            DateTime::<Utc>::from_timestamp(ts, 0)
-                                .unwrap_or_else(Utc::now)
-                        });
+                        // .as_deref() converts Option<String> → Option<&str>
+                        // .filter() keeps Some only if the predicate is true
+                        let end_date = game.end_date
+                            .as_deref()
+                            .filter(|s| *s != "N/A")
+                            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                            .map(|dt| dt.with_timezone(&Utc));
+
+                        let original_price = game.worth
+                            .filter(|w| w != "N/A");
+
+                        // .contains() on &str checks for a substring
+                        let store = if game.platforms.contains("Epic") {
+                            Store::EpicGames
+                        } else {
+                            Store::Steam
+                        };
+
+                        // .replace() returns a new String — strings are immutable in Rust
+                        let title = game.title
+                            .replace(" (Epic Games) Giveaway", "")
+                            .replace(" (Steam) Giveaway", "")
+                            .replace(" Giveaway", "");
 
                         FreeGame {
-                            title: game.title,
-                            store: Store::Steam,
-                            url,
-                            original_price: game.original_price,
+                            title,
+                            store,
+                            url: game.open_giveaway_url,
+                            original_price,
                             end_date,
-                            image_url: Some(format!(
-                                "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
-                                game.app_id
-                            )),
+                            image_url: game.thumbnail,
                         }
                     })
                     .collect();
@@ -331,39 +309,48 @@ pub async fn fetch_steam_free_games() -> Result<Vec<FreeGame>, reqwest::Error> {
             }
         }
         Err(e) => {
-            tracing::warn!("Impossible de récupérer les jeux Steam gratuits: {}", e);
+            tracing::warn!("Failed to fetch GamerPower games: {}", e);
         }
     }
 
-    // Fallback: retourner une liste vide
     Ok(Vec::new())
 }
 
-/// Récupère tous les jeux gratuits (Steam + Epic).
+/// Fetches all free games from Epic API + GamerPower, with deduplication.
 ///
-/// ## Concept Rust : tokio::join! pour parallélisme
-/// Exécute les deux requêtes en parallèle plutôt que séquentiellement.
+/// `tokio::join!` runs multiple futures concurrently on the same task —
+/// both HTTP requests are in-flight simultaneously.
 pub async fn fetch_all_free_games() -> Vec<FreeGame> {
-    // ## Concept : Parallel async avec tokio::join!
-    let (epic_result, steam_result) = tokio::join!(
+    let (epic_result, gamerpower_result) = tokio::join!(
         fetch_epic_free_games(),
-        fetch_steam_free_games()
+        fetch_gamerpower_games()
     );
 
     let mut all_games = Vec::new();
 
-    // ## Concept : if let Ok pour ignorer les erreurs
     if let Ok(games) = epic_result {
+        // .extend() appends all elements from an iterator
         all_games.extend(games);
     } else {
-        tracing::warn!("Erreur lors de la récupération des jeux Epic");
+        tracing::warn!("Failed to fetch Epic games");
     }
 
-    if let Ok(games) = steam_result {
-        all_games.extend(games);
+    // Deduplicate: skip GamerPower games already found via Epic API.
+    // .any() returns true if any element matches the predicate (short-circuits).
+    if let Ok(games) = gamerpower_result {
+        for game in games {
+            let title_lower = game.title.to_lowercase();
+            let already_exists = all_games.iter().any(|existing| {
+                existing.title.to_lowercase() == title_lower
+            });
+            if !already_exists {
+                all_games.push(game);
+            }
+        }
     }
 
-    // Trier par date de fin (les plus urgents en premier)
+    // .sort_by() sorts in place using a custom comparator.
+    // The closure receives references (&) to two elements and returns an Ordering.
     all_games.sort_by(|a, b| {
         match (&a.end_date, &b.end_date) {
             (Some(a_date), Some(b_date)) => a_date.cmp(b_date),
@@ -382,6 +369,7 @@ mod tests {
 
     #[test]
     fn test_store_display() {
+        // .to_string() calls the Display trait implementation
         assert_eq!(Store::Steam.to_string(), "Steam");
         assert_eq!(Store::EpicGames.to_string(), "Epic Games");
     }

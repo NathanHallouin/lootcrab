@@ -2,123 +2,133 @@
 
 ## Why Async?
 
-A Discord bot handles many I/O operations (network requests). Async allows suspending a task while waiting, freeing the thread for other work.
+A Discord bot is I/O-bound: it waits for network responses, user input, timers.
+Async allows suspending a task while waiting, freeing the thread for other work —
+without the overhead of OS threads.
 
 ## Key Concepts
 
 | Concept | Description |
 |---------|-------------|
-| `async fn` | Returns a `Future` instead of the value directly |
-| `await` | Suspends execution until the Future is ready |
+| `async fn` | Returns a `Future` — doesn't execute until awaited |
+| `.await` | Suspends execution until the Future completes |
 | `Future` | A value that will be available later |
 | Runtime | Executes futures (we use Tokio) |
 
-## Basic Usage
+## The Tokio Runtime
 
 ```rust
 // src/main.rs
-#[tokio::main]  // Sets up the Tokio runtime
+#[tokio::main]  // Macro that creates a multi-threaded Tokio runtime
 async fn main() -> Result<(), Error> {
-    // async code here
-}
-
-// src/commands/timer.rs
-async fn timer(...) {
-    // await suspends until sleep completes
-    tokio::time::sleep(duration).await;
-
-    // Continue after sleep
-    send_message().await;
+    // All async code runs inside this runtime
 }
 ```
 
-## Spawning Tasks
-
-`tokio::spawn` creates an independent task that runs in the background.
+`#[tokio::main]` expands to roughly:
 
 ```rust
-// src/main.rs
-tokio::spawn(async move {
-    scheduler.run().await;  // Runs forever in background
-});
-
-// Main function continues immediately
-// The spawned task runs concurrently
+fn main() {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        // your async main body
+    })
+}
 ```
 
-## Parallel Execution
+## Spawning Independent Tasks
+
+`tokio::spawn` creates a task that runs independently in the background.
+
+```rust
+// src/commands/timer.rs
+// Clone data before the move — spawned tasks must own their data
+let channel_id = ctx.channel_id();
+let http = ctx.serenity_context().http.clone();  // Arc::clone (cheap)
+
+// `async move` takes ownership of captured variables
+tokio::spawn(async move {
+    sleep(duration).await;  // Suspends this task, not the whole thread
+    channel_id.say(&http, reminder).await;
+});
+// Function returns immediately — timer runs in background
+```
+
+## Parallel Execution with tokio::join!
 
 ```rust
 // src/services/free_games.rs
-
-// Sequential (slow)
-let epic = fetch_epic_games().await;
-let steam = fetch_steam_games().await;
-
-// Parallel (fast) - both requests run simultaneously
-let (epic, steam) = tokio::join!(
-    fetch_epic_games(),
-    fetch_steam_games()
+// Both requests are in-flight simultaneously
+let (epic_result, gamerpower_result) = tokio::join!(
+    fetch_epic_free_games(),      // Starts immediately
+    fetch_gamerpower_games()      // Starts immediately
 );
+// Continues when BOTH are done
+```
+
+Compare with sequential (slower):
+
+```rust
+let epic = fetch_epic_free_games().await;      // Wait...
+let steam = fetch_gamerpower_games().await;    // Then wait again...
 ```
 
 ## Async File I/O
 
 ```rust
-// src/services/config.rs
-use tokio::fs;
-
-// Read file asynchronously
-let content = fs::read_to_string(&path).await?;
-
-// Write file asynchronously
-fs::write(&path, json).await?;
+// src/services/config.rs — tokio::fs is the async version of std::fs
+let content = tokio::fs::read_to_string(&path).await?;
+tokio::fs::write(&path, json).await?;
+tokio::fs::create_dir_all(parent).await?;
 ```
 
-## Common Patterns
-
-### Defer for Long Operations
+## Deferring Long Operations
 
 ```rust
 // src/commands/games.rs
 pub async fn freegames(ctx: Context<'_>) -> Result<(), Error> {
-    // Show "typing..." indicator while working
+    // Discord requires a response within 3 seconds.
+    // defer() sends "bot is thinking..." and gives us 15 minutes.
     ctx.defer().await?;
 
-    // Now do slow work
-    let games = fetch_all_free_games().await;
-    ctx.say(format_games(&games)).await?;
+    let games = fetch_all_free_games().await;  // May take several seconds
+    ctx.send(reply).await?;
     Ok(())
 }
 ```
 
-### Timeouts
-
-```rust
-use tokio::time::{timeout, Duration};
-
-match timeout(Duration::from_secs(10), fetch_data()).await {
-    Ok(result) => result?,
-    Err(_) => return Err("Request timed out".into()),
-}
-```
-
-### Periodic Tasks
+## Long-Running Loops
 
 ```rust
 // src/services/scheduler.rs
-loop {
-    let wait = calculate_next_run();
-    tokio::time::sleep(wait).await;
+pub async fn run(self) {
+    loop {
+        let config = self.config.get().await;  // Read current config
+        let wait = Self::duration_until_next_run(config.hour, config.minute);
 
-    do_scheduled_task().await;
+        sleep(wait).await;  // Suspend for hours without blocking
+
+        self.send_notification(channel_id).await;
+    }
 }
 ```
 
-## Gotchas
+## Async Tests
+
+```rust
+// src/services/config.rs
+#[tokio::test]  // Creates a Tokio runtime for the test
+async fn test_config_save_load() {
+    let manager = ConfigManager::load(path).await;
+    manager.set_free_games_channel(Some(12345)).await.unwrap();
+    // ...
+}
+```
+
+## Common Pitfalls
 
 | Issue | Solution |
 |-------|----------|
-| Can't use `&self` across await | Clone data or use `Arc` |
+| Can't hold `&self` across `.await` | Clone data or use `Arc` |
 | Blocking code in async | Use `tokio::task::spawn_blocking` |
-| Future not Send | Ensure all captured data is Send |
+| Future is not `Send` | Ensure all captured data is `Send` |
+| Holding a lock across `.await` | Scope the lock guard with `{ }` |

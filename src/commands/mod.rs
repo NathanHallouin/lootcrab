@@ -1,12 +1,9 @@
-//! # Module des commandes
+//! # Command Modules
 //!
-//! ## Concept Rust : Modules
-//! Les modules permettent d'organiser le code de manière hiérarchique.
-//! `mod.rs` est le point d'entrée d'un module-dossier.
-//!
-//! ## Concept : pub (visibilité)
-//! - `pub mod` : Le module est accessible depuis l'extérieur
-//! - `mod` seul : Le module est privé à ce fichier
+//! ## Rust concepts: Modules and visibility
+//! - `pub mod` makes a module accessible from parent modules
+//! - `mod` (without `pub`) keeps it private
+//! - `mod.rs` is the entry point for a directory-based module
 
 pub mod dev;
 pub mod games;

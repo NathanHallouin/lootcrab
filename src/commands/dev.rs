@@ -1,23 +1,20 @@
-//! # Commandes pour développeurs
+//! # Developer Commands
 //!
-//! ## Concepts Rust illustrés :
-//! - Enums avec données
+//! ## Rust concepts covered:
+//! - Enums and pattern matching
 //! - Derive macros (Debug, Clone, Copy)
-//! - String manipulation
+//! - `impl` blocks for adding methods to types
+//! - `const` vs `let` (compile-time vs runtime)
+//! - String formatting and manipulation
+//! - `if let` for single-pattern matching
 
 use crate::{Context, Error};
 
-/// Langages supportés pour la coloration syntaxique.
-///
-/// ## Concept Rust : Enums
-/// Les enums Rust peuvent contenir des données (comme des variants algébriques).
-/// Ici on utilise un enum simple pour les langages supportés.
-///
-/// ## Concept : Derive macros
-/// `#[derive(...)]` génère automatiquement l'implémentation de traits.
-/// - `Debug` : Permet d'afficher avec `{:?}`
-/// - `Clone` : Permet de dupliquer la valeur
-/// - `Copy` : Permet la copie implicite (pour les petits types)
+/// Enums in Rust can be simple (like C) or hold data per variant.
+/// Here we use a simple enum with derived traits:
+/// - `Copy`: implicit bitwise copy (only for small, stack-allocated types)
+/// - `Clone`: explicit `.clone()` — `Copy` implies `Clone`
+/// - `poise::ChoiceParameter`: generates Discord slash command choices
 #[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
 pub enum Language {
     Rust,
@@ -35,14 +32,11 @@ pub enum Language {
     Toml,
 }
 
+/// `impl` blocks attach methods and associated functions to a type.
+/// Methods take `&self` (immutable borrow) or `&mut self` (mutable borrow).
 impl Language {
-    /// Retourne l'identifiant pour le bloc de code Discord.
-    ///
-    /// ## Concept : impl block
-    /// `impl` permet d'ajouter des méthodes à un type.
     fn as_discord_lang(&self) -> &'static str {
-        // ## Concept : self
-        // `&self` est une référence immuable vers l'instance
+        // Exhaustive match — compiler ensures all variants are handled
         match self {
             Language::Rust => "rust",
             Language::Python => "python",
@@ -61,33 +55,24 @@ impl Language {
     }
 }
 
-/// Commande snippet - Partage un snippet de code formaté.
-///
-/// ## Concept Rust : Paramètres de commande
-/// Les paramètres sont extraits automatiquement par poise
-/// grâce aux attributs `#[description]`.
-#[poise::command(slash_command, prefix_command)]
+/// Share a formatted code snippet with syntax highlighting.
+#[poise::command(slash_command)]
 pub async fn snippet(
     ctx: Context<'_>,
-    #[description = "Langage de programmation"] language: Language,
-    #[description = "Le code à partager"] code: String,
-    #[description = "Description optionnelle"] description: Option<String>,
+    #[description = "Programming language"] language: Language,
+    #[description = "Code to share"] code: String,
+    #[description = "Optional description"] description: Option<String>,
 ) -> Result<(), Error> {
-    // ## Concept : String formatting
-    // On construit le message avec les backticks Discord
-
     let lang_str = language.as_discord_lang();
 
-    // ## Concept : if let pour Option
-    // Alternative plus concise à match pour un seul cas
+    // `if let` is a concise alternative to `match` when you only
+    // care about one variant (here, Some)
     let header = if let Some(desc) = description {
         format!("**{}**\n", desc)
     } else {
         String::new()
     };
 
-    // ## Concept : Raw string literals
-    // Pas nécessaire ici mais utile pour les regex ou strings complexes
     let formatted = format!(
         "{}```{}\n{}\n```",
         header, lang_str, code
@@ -97,29 +82,23 @@ pub async fn snippet(
     Ok(())
 }
 
-/// Commande docs - Recherche dans la documentation Rust.
-///
-/// ## Concept Rust : String slices et manipulation
-#[poise::command(slash_command, prefix_command)]
+/// Search Rust documentation.
+#[poise::command(slash_command)]
 pub async fn docs(
     ctx: Context<'_>,
-    #[description = "Terme à rechercher"] query: String,
+    #[description = "Search term"] query: String,
 ) -> Result<(), Error> {
-    // ## Concept : URL encoding
-    // On encode la query pour l'URL (simplifié ici)
     let encoded_query = query.replace(' ', "+");
 
-    // ## Concept : const vs let
-    // `const` pour les valeurs connues à la compilation
     const DOCS_BASE_URL: &str = "https://doc.rust-lang.org/std";
     const CRATES_IO_URL: &str = "https://docs.rs";
 
     let response = format!(
-        "**Recherche pour `{}`:**\n\n\
-        📚 [Documentation standard]({}/index.html?search={})\n\
+        "**Search for `{}`:**\n\n\
+        📚 [Standard library docs]({}/index.html?search={})\n\
         📦 [docs.rs (crates)]({}?search={})\n\
         🔍 [Rust by Example](https://doc.rust-lang.org/rust-by-example/)\n\n\
-        💡 Tip: Utilise `cargo doc --open` pour la doc de ton projet!",
+        Tip: Run `cargo doc --open` to view your project's docs locally!",
         query,
         DOCS_BASE_URL, encoded_query,
         CRATES_IO_URL, encoded_query

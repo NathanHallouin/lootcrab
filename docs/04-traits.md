@@ -1,58 +1,41 @@
 # Traits
 
-Traits define shared behavior (like interfaces in other languages).
+Traits define shared behavior — similar to interfaces in other languages, but more powerful.
 
 ## Standard Library Traits
 
 ```rust
-// Clone - explicit duplication
 trait Clone {
-    fn clone(&self) -> Self;
+    fn clone(&self) -> Self;        // Explicit duplication
 }
 
-// Debug - debug formatting
-trait Debug {
-    fn fmt(&self, f: &mut Formatter) -> Result;
-}
-
-// Default - default values
-trait Default {
-    fn default() -> Self;
-}
-
-// Display - user-facing formatting
 trait Display {
-    fn fmt(&self, f: &mut Formatter) -> Result;
+    fn fmt(&self, f: &mut Formatter) -> Result;  // User-facing: {}
+}
+
+trait Debug {
+    fn fmt(&self, f: &mut Formatter) -> Result;  // Developer-facing: {:?}
+}
+
+trait Default {
+    fn default() -> Self;           // Create a default value
 }
 ```
 
 ## Implementing Traits
 
-### Using Derive (automatic)
+### With Derive (automatic)
 
 ```rust
-#[derive(Debug, Clone, Default)]
-pub struct PomodoroConfig {
-    pub work_duration: u64,
-    pub break_duration: u64,
-}
-// Compiler generates implementations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Store { Steam, EpicGames }
+// The compiler generates all 5 trait implementations
 ```
 
 ### Manual Implementation
 
 ```rust
-// src/models/mod.rs
-impl Default for PomodoroConfig {
-    fn default() -> Self {
-        Self {
-            work_duration: 25,
-            break_duration: 5,
-        }
-    }
-}
-
-// src/services/free_games.rs
+// src/services/free_games.rs — Display for user-facing output
 impl std::fmt::Display for Store {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -61,27 +44,36 @@ impl std::fmt::Display for Store {
         }
     }
 }
-```
+// Now you can: format!("{}", Store::Steam) → "Steam"
+//         and: Store::Steam.to_string()    → "Steam"
 
-## The From/Into Traits
-
-Enable type conversions.
-
-```rust
-// src/error.rs
-impl From<std::env::VarError> for BotError {
-    fn from(err: std::env::VarError) -> Self {
-        BotError::Config(err.to_string())
+// src/services/config.rs — Default for sensible initial values
+impl Default for BotConfig {
+    fn default() -> Self {
+        Self {
+            free_games_channel_id: None,
+            free_games_hour: 9,
+            free_games_minute: 0,
+        }
     }
 }
-
-// Now this works automatically:
-let token = std::env::var("TOKEN")?;  // VarError converts to BotError
+// Now you can: BotConfig::default()
+//         and: serde_json::from_str(&s).unwrap_or_default()
 ```
 
-## Trait Bounds
+## Trait Objects — Dynamic Dispatch
 
-Constrain generic types.
+When you need to hold "any type that implements a trait":
+
+```rust
+// src/main.rs
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+// Box<dyn Trait> = a pointer to any type implementing that trait.
+// `dyn` = dynamic dispatch (resolved at runtime via vtable).
+// `Send + Sync` = safe to use across threads (required for async).
+```
+
+## Trait Bounds — Constraining Generics
 
 ```rust
 // T must implement Clone and Debug
@@ -90,22 +82,41 @@ fn process<T: Clone + Debug>(item: T) {
     println!("{:?}", copy);
 }
 
-// Alternative syntax with where
+// Alternative with `where` clause (cleaner for many bounds)
 fn process<T>(item: T)
 where
-    T: Clone + Debug,
+    T: Clone + Debug + Send + Sync,
 {
     // ...
 }
 ```
 
-## Common Patterns
+## Auto Traits: Send and Sync
 
-| Pattern | Traits Used |
-|---------|-------------|
-| Printable for debugging | `Debug` |
-| Duplicatable | `Clone` (explicit) or `Copy` (implicit) |
-| Comparable | `PartialEq`, `Eq`, `PartialOrd`, `Ord` |
-| Hashable (for HashMap keys) | `Hash` + `Eq` |
-| Serializable | `Serialize`, `Deserialize` (serde) |
-| Error type | `Error` + `Display` + `Debug` |
+Rust uses `Send` and `Sync` to guarantee thread safety at compile time:
+
+| Trait | Meaning |
+|-------|---------|
+| `Send` | Can be transferred to another thread |
+| `Sync` | Can be referenced from multiple threads |
+
+Most types are automatically `Send + Sync`. Notable exceptions:
+- `Rc` (use `Arc` instead)
+- `RefCell` (use `RwLock` or `Mutex` instead)
+
+```rust
+// src/main.rs — Error must be Send + Sync for use across async tasks
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+```
+
+## Common Trait Patterns in This Project
+
+| Pattern | Traits | Example |
+|---------|--------|---------|
+| Debugging | `Debug` | All structs and enums |
+| Cloning | `Clone`, `Copy` | `Store` (Copy), `FreeGame` (Clone) |
+| Comparison | `PartialEq`, `Eq` | `Store` for `==` in `.filter()` |
+| Serialization | `Serialize`, `Deserialize` | `BotConfig` ↔ JSON |
+| User display | `Display` | `Store` for embed text |
+| Default values | `Default` | `BotConfig::default()` |
+| Error types | `Error + Display + Debug` | `Box<dyn Error>` |

@@ -1,12 +1,9 @@
 //! # Services
 //!
-//! ## Concept Rust : Séparation des responsabilités
-//! Les services encapsulent la logique métier complexe,
-//! séparée des commandes Discord.
+//! ## Rust concept: Separation of concerns
+//! Services encapsulate business logic (API calls, scheduling, persistence),
+//! keeping it separate from Discord command handlers.
 
 pub mod config;
 pub mod free_games;
 pub mod scheduler;
-
-// À implémenter plus tard :
-// pub mod github;

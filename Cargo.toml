@@ -7,36 +7,33 @@ description = "Discord bot for free games notifications and dev tools, built in 
 license = "MIT"
 
 [dependencies]
-# Discord API framework (built on serenity)
-# Utilise rustls par défaut (pas de dépendance à OpenSSL)
+# Discord API framework (built on serenity, uses rustls — no OpenSSL dependency)
 poise = "0.6"
 
-# Async runtime - CONCEPT: async/await
+# Async runtime
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "fs"] }
 
-# Environment variables - CONCEPT: configuration management
+# Environment variables from .env files
 dotenvy = "0.15"
 
-# Logging/tracing - CONCEPT: observability
+# Structured logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Serialization - CONCEPT: traits, derive macros
+# JSON serialization/deserialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Error handling - CONCEPT: Result, custom errors
+# Error handling
 thiserror = "2"
 anyhow = "1"
 
-# HTTP client for external APIs
-# rustls-tls évite la dépendance à OpenSSL
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# HTTP client (rustls backend — no OpenSSL dependency)
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 
 # Date/time handling
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-# Testing - CONCEPT: unit tests, mocking
 tokio-test = "0.4"
 tempfile = "3"

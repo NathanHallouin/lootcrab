@@ -1,10 +1,13 @@
-//! # DevGamer Bot - Point d'entrée
+//! # LootCrab - Entry Point
 //!
-//! ## Concepts Rust illustrés ici :
-//! - `async/await` : Programmation asynchrone avec Tokio
-//! - `Result<T, E>` : Gestion des erreurs explicite
-//! - `?` operator : Propagation élégante des erreurs
-//! - Modules : Organisation du code en modules
+//! ## Rust concepts covered:
+//! - `async/await` with the Tokio runtime
+//! - `Result<T, E>` for explicit error handling
+//! - `?` operator for error propagation
+//! - Module system and code organization
+//! - Type aliases for complex types
+//! - Closures and `move` semantics
+//! - `Box::pin` for heap-allocated futures
 
 use poise::serenity_prelude as serenity;
 use std::path::PathBuf;
@@ -12,70 +15,60 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod commands;
-mod error;
-mod models;
 mod services;
-mod utils;
 
 use services::config::ConfigManager;
 use services::scheduler::FreeGamesScheduler;
 
-/// Données partagées entre toutes les commandes du bot.
+/// Shared state accessible from all commands.
 ///
-/// ## Concept Rust : Struct avec Clone
-/// Une struct permet de regrouper des données liées.
-/// ConfigManager utilise Arc<RwLock> en interne, donc Clone est peu coûteux.
+/// `ConfigManager` uses `Arc<RwLock>` internally, so cloning is cheap
+/// (only increments a reference counter).
 #[derive(Clone)]
 pub struct Data {
-    /// Timestamp de démarrage du bot (pour la commande uptime)
     pub start_time: std::time::Instant,
-    /// Gestionnaire de configuration persistante
     pub config: ConfigManager,
 }
 
-/// Alias de type pour simplifier les signatures de fonction.
+/// Type aliases simplify complex generic signatures.
 ///
-/// ## Concept Rust : Type Alias
-/// `type` crée un alias pour un type complexe, améliorant la lisibilité.
+/// `Box<dyn Error + Send + Sync>` is a trait object: any error type behind a pointer.
+/// `Send + Sync` bounds are required for use across async task boundaries.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
+
+/// The `'a` lifetime ensures the context cannot outlive the data it borrows.
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
-/// Point d'entrée asynchrone du programme.
-///
-/// ## Concepts Rust :
-/// - `#[tokio::main]` : Macro qui configure le runtime async
-/// - `async fn` : Fonction asynchrone
-/// - `Result<(), Error>` : Retourne Ok(()) ou une erreur
+/// `#[tokio::main]` is a procedural macro that sets up the async runtime.
+/// It transforms `async fn main()` into a synchronous `fn main()` that
+/// creates a Tokio runtime and blocks on the future.
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    // Charger les variables d'environnement depuis .env
+    // .ok() discards the Result — it's fine if .env doesn't exist
     dotenvy::dotenv().ok();
 
-    // Configurer le système de logging
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    // Récupérer le token Discord depuis l'environnement
+    // .expect() panics with a message on Err — appropriate here since
+    // the bot cannot function without a token (unrecoverable error)
     let token = std::env::var("DISCORD_TOKEN")
-        .expect("Variable DISCORD_TOKEN manquante dans .env");
+        .expect("Missing DISCORD_TOKEN in .env");
 
-    // Charger la configuration persistante
-    // ## Concept : PathBuf pour les chemins de fichiers
     let config_path = PathBuf::from("data/config.json");
     let config = ConfigManager::load(config_path).await;
 
-    info!("Configuration chargée");
+    info!("Configuration loaded");
 
-    // Configurer les intents Discord (permissions)
-    let intents = serenity::GatewayIntents::non_privileged()
-        | serenity::GatewayIntents::MESSAGE_CONTENT;
+    // Gateway intents control which events the bot receives.
+    // non_privileged() excludes MESSAGE_CONTENT (not needed for slash commands).
+    let intents = serenity::GatewayIntents::non_privileged();
 
-    // Cloner config pour le move dans setup
+    // Clone before the `move` closure captures ownership
     let config_for_setup = config.clone();
 
-    // Construire le framework avec toutes les commandes
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
             commands: vec![
@@ -90,31 +83,38 @@ async fn main() -> Result<(), Error> {
                 commands::games::freegames_setup(),
                 commands::games::freegames_status(),
             ],
-            prefix_options: poise::PrefixFrameworkOptions {
-                prefix: Some("!".into()),
-                ..Default::default()
-            },
+            // Struct update syntax: fill remaining fields with Default
             ..Default::default()
         })
+        // `move` transfers ownership of captured variables into the closure.
+        // `Box::pin` is needed because async closures return unsized Futures.
         .setup(move |ctx, _ready, framework| {
             let http = ctx.http.clone();
             let config = config_for_setup;
 
             Box::pin(async move {
-                // Enregistrer les slash commands
-                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                info!("Bot démarré et prêt !");
+                // Register slash commands: guild-scoped (instant) in dev,
+                // global (up to 1h delay) in production
+                if let Ok(guild_id) = std::env::var("DEV_GUILD_ID") {
+                    if let Ok(id) = guild_id.parse::<u64>() {
+                        let guild = serenity::GuildId::new(id);
+                        poise::builtins::register_in_guild(ctx, &framework.options().commands, guild).await?;
+                        info!("Slash commands registered on dev guild ({})", id);
+                    }
+                } else {
+                    poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                }
+                info!("Bot started and ready!");
 
-                // Démarrer le scheduler de jeux gratuits
-                // ## Concept : Le scheduler tourne en arrière-plan et lit la config dynamiquement
+                // tokio::spawn launches an independent async task.
+                // `async move` takes ownership of captured variables.
                 let scheduler = FreeGamesScheduler::new(http, config.clone());
                 tokio::spawn(async move {
                     scheduler.run().await;
                 });
 
-                info!("Scheduler de jeux gratuits démarré (config dynamique via /freegames-setup)");
+                info!("Free games scheduler started (dynamic config via /freegames-setup)");
 
-                // Retourner les données partagées
                 Ok(Data {
                     start_time: std::time::Instant::now(),
                     config,
@@ -123,18 +123,19 @@ async fn main() -> Result<(), Error> {
         })
         .build();
 
-    // Créer et démarrer le client Discord
     let client = serenity::ClientBuilder::new(token, intents)
         .framework(framework)
         .await;
 
+    // Pattern matching on Result to handle success/failure explicitly
     match client {
         Ok(mut client) => {
-            info!("Connexion à Discord...");
+            info!("Connecting to Discord...");
             client.start().await?;
         }
         Err(e) => {
-            tracing::error!("Erreur lors de la création du client: {}", e);
+            tracing::error!("Failed to create client: {}", e);
+            // .into() converts serenity::Error into Box<dyn Error>
             return Err(e.into());
         }
     }
